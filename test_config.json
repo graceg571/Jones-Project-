@@ -1,0 +1,46 @@
+{
+    "run_name" : "attempt_7",
+    "total_population" : 6600,
+    "chain_length" : 1000,
+    "num_reps" : 100,
+    "shapefile_path" : "jones_blocks.shp",
+    "population_tolerance" : 0.03, 
+    "districting_configs" : [
+                        {
+                            "num_districts" : 6,
+                            "num_winners_per_district" : 1,
+                            "num_candidates_per_slate" : 3
+                        },
+                        {
+                            "num_districts" : 3,
+                            "num_winners_per_district" : 2,
+                            "num_candidates_per_slate" : 4
+                        },
+                        {
+                            "num_districts" : 1,
+                            "num_winners_per_district" : 6,
+                            "num_candidates_per_slate" : 8
+                        }],
+    "cohesion_values" : {
+                            "B": {
+                                "B": 0.98,
+                                "NB": 0.02
+                                },
+                            "NB": {
+                                "B": 0.13,
+                                "NB": 0.87
+                                }
+                        },
+    "alpha_values" : {
+                        "B": {
+                            "B": 1.0,
+                            "NB": 1.0
+                            },
+                        "NB": {
+                            "B": 1.0,
+                            "NB": 1.0
+                            }
+                    }
+
+
+}

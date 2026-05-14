@@ -1,0 +1,9 @@
+outputs/
+*.shp
+*.dbf
+*.prj
+*.cpg
+*.shx
+*.zip
+__pycache__/
+.DS_Store
