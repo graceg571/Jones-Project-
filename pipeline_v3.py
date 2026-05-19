@@ -20,7 +20,7 @@ from votekit.ballot_generator import (
 from votekit import RankProfile, ScoreProfile
 from votekit.elections import Plurality, FastSTV as STV, Borda, Cumulative, RankedPairs
 import argparse 
-import glob
+from glob import glob
 from joblib import Parallel, delayed
 import re 
 from collections import defaultdict
@@ -191,7 +191,7 @@ def generate_preference_profiles(config):
         for rep in range(num_reps):
             for generative_mode in ['slate-pl', 'name-cumulative']:
                 settings_folder = Path(f"outputs/{run_name}/settings/{dc['num_districts']}_districts")
-                for settings_path in tqdm(settings_folder.glob("*.json"), total=len(list(settings_folder.glob("*.json"))), desc=f"Generating preference profiles using {generative_mode} model for each district plan of {dc['num_districts']}-district plans"): # loop through all plans and all districts 
+                for settings_path in settings_folder.glob("*.json"): # loop through all plans and all districts 
                     settings_file = open(settings_path, 'r')
                     settings = json.load(settings_file)
                     bloc_config = BlocSlateConfig(
@@ -245,14 +245,13 @@ def simulate_elections(config):
     
     run_name = config["run_name"]
     for generative_mode in ['name-cumulative', 'slate-pl']:
-        election_results_folder = Path(f"outputs/attempt_9_results/election_results/{generative_mode}")
+        election_results_folder = Path(f"outputs/{run_name}/election_results/{generative_mode}")
         election_results_folder.mkdir(parents=True, exist_ok=True)
         for dc in config["districting_configs"]:
             profile_fp = Path(f"outputs/{run_name}/profiles/{dc['num_districts']}_districts/{generative_mode}")
             profile_files = glob(f"{profile_fp}/*.csv")
             print(f"{generative_mode} - {dc['num_districts']} : {len(profile_files)}")
             all_election_results = Parallel(n_jobs=-1)(delayed(process_pp)(pp, dc["num_winners_per_district"]) for pp in profile_files)
-            print(f"election results: {all_election_results}")
             # save election results to file
             out_path = election_results_folder / f"{run_name}_{dc['num_districts']}_districts_{dc['num_winners_per_district']}_winners_election_results.json"
             election_results, fps = zip(*all_election_results)
