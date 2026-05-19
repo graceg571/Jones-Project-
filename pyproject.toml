@@ -14,4 +14,5 @@ dependencies = [
     "jsonlines>=4.0.0",
     "ipykernel>=7.2.0",
     "ipympl>=0.10.0",
+    "binary-ensemble",
 ]

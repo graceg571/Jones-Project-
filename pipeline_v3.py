@@ -20,8 +20,15 @@ from votekit.ballot_generator import (
 from votekit import RankProfile, ScoreProfile
 from votekit.elections import Plurality, FastSTV as STV, Borda, Cumulative, RankedPairs
 import argparse 
+import glob
+from joblib import Parallel, delayed
+import re 
+from collections import defaultdict
+import matplotlib.pyplot as plt
+from collections import Counter 
+import random
 
-
+# TODO: Add these as user inputs/config file
 POP_COL = "TOTPOP"
 VAP_COL = "VAP"
 BVAP_COL = "BVAP"
@@ -176,12 +183,12 @@ def generate_preference_profiles(config):
             return name_cumulative_profile_generator(config, total_points=total_points)
         else:
             raise ValueError("Non-compatible generative mode for preference profile given")
-    # for each settings file, generate a bloc slate profile using slate pl 
-    num_reps = config["num_reps"] # number of preference profile samples to generate per district
+
     run_name = config["run_name"]
     # for each districting plan and each district of that plan, generate NUM_REPS preference profiles and save them to file
-    for rep in range(num_reps):
-        for dc in config["districting_configs"]:
+    for dc in config["districting_configs"]:
+        num_reps = dc["num_reps"]
+        for rep in range(num_reps):
             for generative_mode in ['slate-pl', 'name-cumulative']:
                 settings_folder = Path(f"outputs/{run_name}/settings/{dc['num_districts']}_districts")
                 for settings_path in tqdm(settings_folder.glob("*.json"), total=len(list(settings_folder.glob("*.json"))), desc=f"Generating preference profiles using {generative_mode} model for each district plan of {dc['num_districts']}-district plans"): # loop through all plans and all districts 
@@ -211,68 +218,175 @@ def simulate_elections(config):
         return ScoreProfile.from_csv(filepath) if "name-cumulative" in str(filepath) else RankProfile.from_csv(filepath)
     def get_winners(elected_candidates):
         winners = []
-        for candidate in elected_candidates:
-            winners.append(str(next(iter(candidate))))
-        return winners
+        return [winner for winners in elected_candidates for winner in winners]
+    def process_pp(pf, num_winners):
+        pp = get_profile(pf)
+        election_results = {}
+        if num_winners > 1:
+            # stv, borda, cumulative, ranked pairs
+            if type(pp) == RankProfile:
+                elected_stv = STV(pp, n_seats=num_winners, tiebreak='random').get_elected()
+                elected_borda = Borda(pp, n_seats=num_winners, tiebreak='random').get_elected()
+                elected_ranked_pairs = RankedPairs(pp, n_seats=num_winners, tiebreak='random').get_elected()
+                election_results["stv"] = get_winners(elected_stv)
+                election_results["borda"] = get_winners(elected_borda)
+                election_results["ranked_pairs"] = get_winners(elected_ranked_pairs)
+            if type(pp) == ScoreProfile:
+                elected_cumulative = Cumulative(pp, n_seats = num_winners, tiebreak='random').get_elected()
+                election_results["cumulative"] = get_winners(elected_cumulative)
+        else:
+            # plurality, irv
+            if type(pp) == RankProfile:
+                elected_plurality = Plurality(pp, n_seats=1, tiebreak='random').get_elected()
+                elected_irv = STV(pp, n_seats=1, tiebreak='random').get_elected()
+                election_results['plurality'] = get_winners(elected_plurality)
+                election_results['irv'] = get_winners(elected_irv)
+        return (election_results, pf)
+    
     run_name = config["run_name"]
-    for generative_mode in ['slate-pl', 'name-cumulative']:
-        election_results_folder = Path(f"outputs/attempt_5_split/election_results/{generative_mode}")
+    for generative_mode in ['name-cumulative', 'slate-pl']:
+        election_results_folder = Path(f"outputs/attempt_9_results/election_results/{generative_mode}")
         election_results_folder.mkdir(parents=True, exist_ok=True)
         for dc in config["districting_configs"]:
-            profile_files = Path(f"outputs/{run_name}/profiles/{dc['num_districts']}_districts/{generative_mode}")
-            all_election_results = []
-            profile_files_paths = []
-            profile_files_v1_50 = [f for f in profile_files.glob("*_v*.csv") if any(f.name.endswith(f"_v{i}.csv" ) for i in range (1,51))]
-            for profile_file in tqdm(profile_files_v1_50, total = len(list(profile_files_v1_50)), desc=f"Simulating election results for profiles generated with {generative_mode} model for each district plan of {dc['num_districts']}-district plans"):
-                pp = get_profile(profile_file)
-                profile_files_paths.append(str(profile_file))
-                if dc["num_winners_per_district"] > 1:
-                    election_results = {}
-                    # stv, borda, cumulative, ranked pairs
-                    if type(pp) == RankProfile:
-                        elected_stv = STV(pp, n_seats=dc["num_winners_per_district"], tiebreak='random').get_elected()
-                        elected_borda = Borda(pp, n_seats=dc["num_winners_per_district"], tiebreak='random').get_elected()
-                        elected_ranked_pairs = RankedPairs(pp, n_seats=dc["num_winners_per_district"], tiebreak='random').get_elected()
-                        election_results["stv"] = get_winners(elected_stv)
-                        election_results["borda"] = get_winners(elected_borda)
-                        election_results["ranked_pairs"] = get_winners(elected_ranked_pairs)
-                    if type(pp) == ScoreProfile:
-                        elected_cumulative = Cumulative(pp, n_seats = dc["num_winners_per_district"], tiebreak='random').get_elected()
-                        election_results["cumulative"] = get_winners(elected_cumulative)
-                else:
-                    # plurality, irv
-                    
-                    election_results = {}
-                    if type(pp) == RankProfile:
-                        elected_plurality = Plurality(pp, n_seats=1, tiebreak='random').get_elected()
-                        elected_irv = STV(pp, n_seats=1, tiebreak='random').get_elected()
-                        election_results['plurality'] = get_winners(elected_plurality)
-                        election_results['irv'] = get_winners(elected_irv)
-                    else:
-                        election_results['plurality'] = ["~"]
-                        election_results['irv'] = ['~']
-                all_election_results.append(election_results)
-            
+            profile_fp = Path(f"outputs/{run_name}/profiles/{dc['num_districts']}_districts/{generative_mode}")
+            profile_files = glob(f"{profile_fp}/*.csv")
+            print(f"{generative_mode} - {dc['num_districts']} : {len(profile_files)}")
+            all_election_results = Parallel(n_jobs=-1)(delayed(process_pp)(pp, dc["num_winners_per_district"]) for pp in profile_files)
+            print(f"election results: {all_election_results}")
             # save election results to file
             out_path = election_results_folder / f"{run_name}_{dc['num_districts']}_districts_{dc['num_winners_per_district']}_winners_election_results.json"
+            election_results, fps = zip(*all_election_results)
             json_info = {
                 "run_name" : run_name,
                 "num_districts": dc["num_districts"],
                 "num_winners_per_district": dc["num_winners_per_district"],
-                "election_results": all_election_results,
-                "profile_files" : profile_files_paths,
+                "election_results": election_results,
+                "profile_files" : fps,
                 "preference_profile_generative_model" : generative_mode
             }
             with open(out_path, "w") as f:
                 json.dump(json_info, f, indent=4)
 
+def summarize_results(config) -> dict:
+    # count number of seats won by slate B 
+    run_name = config["run_name"]
+    election_results_path = Path(f"outputs/{run_name}/election_results")
+    summary_dict = {}
+    for generative_mode in ["name-cumulative", "slate-pl"]:
+        election_results_files = Path(f"{election_results_path}/{generative_mode}").glob("*.json")
+        for filepath in election_results_files:
+            fname = filepath.stem
+            match = re.search(r'_(\d+)_districts_(\d+)_winners', fname)
+            num_districts = int(match.group(1))
+            num_winners = int(match.group(2))
+            key = f"{num_districts} x {num_winners}"
+            if key not in summary_dict:
+                summary_dict[f"{num_districts} x {num_winners}"] = {
+                    "number_of_districts" : num_districts,
+                    "num_seats_per_district" : num_winners,
+                    "generative_mode" : [],
+                }
+            if generative_mode not in summary_dict[key]["generative_mode"]:
+                summary_dict[key]["generative_mode"].append(generative_mode)
+            if generative_mode not in summary_dict[key]:
+                summary_dict[key][generative_mode] = {}
+
+            # open file 
+            # count the number of seats won by B candidate per each election 
+            with open(filepath) as f: 
+                results = json.load(f)
+                print(f"number of elections: {len(results['election_results'])}")
+                print(f"number of preference profile files {len(results['profile_files'])}")
+                # extract information of the districting plan, sample #, and district 
+                district_plan = {}
+                summary_results = {} 
+                # create a dictionary of rule dictionaries with list of district results
+                grouped = defaultdict(lambda: defaultdict(list))
+                summary_grouped = defaultdict(lambda: defaultdict(int))
+                for (profile_file, election_result) in zip(results["profile_files"], results["election_results"]):
+                    # each election result file represents all the districting plan results for a particular district configuration and generative mode 
+                    # get the plan idx, pp iteration, and district for each election result
+                    match = re.search(r'sample_(\d+)_district_(\d+)_rep_v(\d+)', profile_file)
+                    plan_index = int(match.group(1))
+                    district = int(match.group(2))
+                    pp_sample = int(match.group(3))
+                    idx_key = (plan_index, pp_sample)
+                    for rule, winners in election_result.items():
+                        if "~" not in winners:
+                            grouped[idx_key][rule].extend(winners)
+                        if len(winners) != num_winners:
+                            print(f"incorrect number of winners for {profile_file}")
+                            print(winners)
+                for key, rule_winners in grouped.items():
+                    expected_winners = num_districts * num_winners
+                    for rule, winners in rule_winners.items():
+                        if len(winners) != expected_winners:
+                            print(f"Winners across districts {len(winners)} does not meet expected {expected_winners}")
+                            print(key, rule, winners, profile_file)
+                        b_count = sum(1 for w in winners if w.startswith("B"))
+                        summary_grouped[key][rule] = b_count
+            summary_dict[f"{num_districts} x {num_winners}"][generative_mode] = summary_grouped
+    return summary_dict
+
+def visualize_results(summary_dict : dict, config):
+    # subsample the summary plans to ensure each districting config has the same number of results
+    def subsample_summary_plans(summary_dict : dict, num : int, seed : int = 42) -> dict:
+        random.seed(seed)
+        # extract the keys per summary dict (plan_idx, summary_idx)
+        keys = list(summary_dict.keys())
+        sampled = random.sample(keys, min(num, len(keys)))
+        return {k: summary_dict[k] for k in sampled}
+    for dc in summary_dict.keys():
+        for mode in summary_dict[dc]['generative_mode']:
+            summary_dict[dc][mode] = subsample_summary_plans(summary_dict[dc][mode], config["chain_length"])
+    # update tuple key (plan_idx, sample_idx) to be a string
+    # TODO: convert the tuple key to a string when summarizing 
+    bcounts_dict = defaultdict(list)
+    for districting_plan in summary_dict.keys():
+        for mode in summary_dict[districting_plan]["generative_mode"]:
+            for plan in summary_dict[districting_plan][mode]:
+                for election in summary_dict[districting_plan][mode][plan]:
+                    bcounts_dict[f"{election} ({districting_plan})"].append(summary_dict[districting_plan][mode][plan][election])
+    rows = []
+    for election_config, counts in bcounts_dict.items():
+        freq_counts = Counter(counts)
+        rows.append((election_config, freq_counts))
+
+    # max frequency for scaling the bubble 
+    max_freq = max(freq for _,counts in rows for freq in counts.values())
+    # plot counts of number of black seats won per election and districting plan configuration
+    fig, ax = plt.subplots(figsize=(12, len(rows) * 0.8 + 2))
+    colors = [
+            "#e41a1c", "#ff7f00", "#4daf4a",
+            "#377eb8"
+    ]
+    # label = election (num_districts x num_winners), counts = frequency count for number of black seats won 
+    for y_pos, (label, counts) in enumerate(rows):
+    # update colors to match based on the type of election and order the labels in that way too 
+        color = colors[y_pos % len(colors)]
+        for n_black, freq in counts.items():
+            size = (freq / max_freq) * 3000 # max size is 3000, the rest are proptionate to 3000
+            ax.scatter(n_black, y_pos, s=size,
+                        color=color)
+    max_seats = 6
+    ax.set_yticks(range(len(rows)))
+    ax.set_yticklabels([label for label, _ in rows], fontsize=10)
+    ax.set_xlabel("Number of seats won by B slate", fontsize=12)
+    ax.set_xticks(range(max_seats + 1))
+    ax.set_xlim(-0.5, max_seats + 0.5)
+    ax.set_facecolor("white")
+    plt.tight_layout()
+    plt.savefig("bubble_chart.png", dpi=150, bbox_inches="tight", facecolor="white")
+    plt.show()
+
 
 def main(config):
-    #generate_districting_plans(config)
-    #create_settings_files(config)
-    #generate_preference_profiles(config)
-    config["run_name"] = "attempt_5"
+    generate_districting_plans(config)
+    create_settings_files(config)
+    generate_preference_profiles(config)
     simulate_elections(config)
+    summary_dict = summarize_results(config)
+    visualize_results(summary_dict, config)
 
 
 if __name__ == "__main__":
