@@ -9,10 +9,10 @@ from pathlib import Path
 import random
 
 
-from district_generator import _generate_districting_plans
-from settings_writer import _create_settings_files
-from preference_profile_generator import _generate_preference_profiles
-from election_simulator import _simulate_elections
+from pipeline_steps.district_generator import _generate_districting_plans
+from pipeline_steps.settings_writer import _create_settings_files
+from pipeline_steps.preference_profile_generator import _generate_preference_profiles
+from pipeline_steps.election_simulator import _simulate_elections
 
 #TODO: remove hard coded values from here and modules above 
 POP_COL = "TOTPOP"
