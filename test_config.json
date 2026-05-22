@@ -1,8 +1,7 @@
 {
-    "run_name" : "attempt_9",
+    "run_name" : "run_1",
     "total_population" : 6600,
-    "chain_length" : 1000,
-    "num_reps" : 1,
+    "chain_length" : 10,
     "shapefile_path" : "jones_blocks.shp",
     "population_tolerance" : 0.03, 
     "districting_configs" : [
@@ -23,7 +22,7 @@
                             "num_districts" : 1,
                             "num_winners_per_district" : 6,
                             "num_candidates_per_slate" : 8,
-                            "num_reps" : 1000
+                            "num_reps" : 10
                         }],
     "cohesion_values" : {
                             "B": {

@@ -2,6 +2,8 @@ from votekit.ballot_generator import (BlocSlateConfig, slate_pl_profile_generato
 import json
 import re
 from pathlib import Path
+import zipfile
+import io 
 
 # Generate Preference Profile Helper functions 
 def use_generative_model(generative_mode, config, total_points=0):
@@ -40,8 +42,8 @@ def _generate_pp_per_settings(bloc_config : BlocSlateConfig, generative_modes : 
     pass
 
 def _generate_preference_profiles(config):
-    """
-    Generate a preference profile for each district within a districting plan. 
+    """Generate a preference profile for each district within a districting plan. 
+    
     Uses the slate-pl (ranked profile) and name-cumulative (scored profile) models to generate preference profiles.
     Preference Profiles are saved to a csv 
             
@@ -50,23 +52,26 @@ def _generate_preference_profiles(config):
     """
     run_name = config["run_name"]
 
-    # create mapping of number of districts for a plan to number of winners per district and number of times to create a pp per plan
-    num_districts_to_winners = {}
-    num_districts_to_reps = {}
     for dc in config["districting_configs"]:
-        num_districts_to_winners[dc["num_districts"]] = dc["num_winners_per_district"]
-        num_districts_to_reps[dc["num_districts"]] = dc["num_reps"]
-    
-    for generative_mode in ['slate-pl', 'name-cumulative']:
-                for settings_path in config["settings_folder"].glob("*.json"):#erative_mode} model for each district plan of {dc['num_districts']}-district plans"): # loop through all plans and all districts 
+        for generative_mode in ['slate-pl', 'name-cumulative']:
+            if generative_mode == 'name-cumulative' and dc.num_winners_per_district == 1:
+                continue
+            settings_folder = Path(f"outputs/{run_name}/settings/{dc.num_districts}_districts")
+            zip_path = Path(f"outputs/{run_name}/profiles/{dc.num_districts}_districts/{generative_mode}.zip")
+            zip_path.parent.mkdir(parents=True, exist_ok=True)
+            for rep in range(dc.num_reps):
+                for settings_path in settings_folder.glob("*.json"):
                     bloc_config = _build_blocSlateConfig_from_settings(settings_path)
-                    match = re.search(r'_(\d+)_districts', str(settings_path))
-                    num_districts = int(match.group(1))
-                    setting_file_stem = settings_path.stem
-                    profile_folder = Path(f"outputs/{run_name}/profiles/{num_districts}_districts/{generative_mode}")
-                    profile_folder.mkdir(parents=True, exist_ok=True)
-                    for rep in range(num_districts_to_reps[num_districts]):
-                        profile_output = profile_folder / f"{setting_file_stem.replace('settings', 'profile')}_rep_v{rep+1}.csv"
-                        n_points = num_districts_to_winners[num_districts] if generative_mode == "name-cumulative" else 0
-                        profile = use_generative_model(generative_mode, bloc_config, total_points=n_points)
-                        profile.to_csv(profile_output)
+                    n_points = dc.num_winners_per_district if generative_mode == "name-cumulative" else 0
+                    profile = use_generative_model(generative_mode, bloc_config, total_points=n_points)
+
+                    setting_file_stem = Path(settings_path).stem
+                    profile_output_name = f"{setting_file_stem.replace('settings', 'profile')}_rep_v{rep+1}.csv"
+                    # zip profile files together using gzip compression
+                    with zipfile.ZipFile(zip_path, mode='a', compression=zipfile.ZIP_DEFLATED) as zf:
+                        zf.writestr(profile_output_name, profile.to_csv())
+                    
+                    
+
+
+                    

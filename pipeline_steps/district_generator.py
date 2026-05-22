@@ -65,20 +65,25 @@ def _save_district_assignment_vectors(filepath : str, plans : MarkovChain | list
             encoder.write(plans)
 
 def _generate_districting_plans(config):
-    """
-        Generates and stores districting plans using MCMC with the Recom proposal
+    """ Generates and stores districting plans using MCMC with the Recom proposal
         
-        Args:
-            config : json file containing all necessary parameters to work with MCMC
+    Args:
+        config : json file containing all necessary parameters to work with MCMC
     
     """
+    run_name = config["run_name"]
 
     graph = _build_dual_graph(config["shapefile_path"])
     graph_node_order = list(graph.nodes) # used to reorder district assignments later 
     
+    # save graph for settings writer
+    graph_path = Path(f"outputs/{run_name}/{run_name}_graph.json")
+    graph_path.parent.mkdir(parents=True, exist_ok=True)
+    graph.to_json(graph_path)
+    config["graph_path"] = graph_path
+
     # generate districting plans with MCMC
-    run_name = config["run_name"]
-    district_nums = [int(d["num_districts"]) for d in config["districting_configs"]]
+    district_nums = [dc.num_districts for dc in config["districting_configs"]]
 
     for num_districts in district_nums:
         plans = None

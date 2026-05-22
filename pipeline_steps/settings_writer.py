@@ -1,7 +1,10 @@
 import json
 from pyben import PyBenDecoder
-import geopandas as gpd
+from gerrychain import Graph
 from tqdm import tqdm
+from pathlib import Path
+from pipeline_steps.config import DistrictingConfig
+import pandas as pd 
 
 POP_COL = "TOTPOP"
 VAP_COL = "VAP"
@@ -22,7 +25,7 @@ def _make_slates_per_bloc(num_candidates_per_slate : int, group_1_prefix : str, 
         group_2_candidates.append(group_2_prefix + str(cand_num+1))
     return {group_1_prefix : group_1_candidates, group_2_prefix : group_2_candidates}
 
-def _fill_settings_dict(district_label : int, plan_label : int, districting_config : dict, config : dict, bloc_proportions : dict, slate_candidates : dict) -> dict:
+def _fill_settings_dict(district_label : int, plan_label : int, districting_config : DistrictingConfig, config : dict, bloc_proportions : dict, slate_candidates : dict) -> dict:
     settings = {
                     "district" : str(district_label),
                     "sample" : str(plan_label),
@@ -30,8 +33,8 @@ def _fill_settings_dict(district_label : int, plan_label : int, districting_conf
                     "slate_to_candidates" : slate_candidates,
                     "cohesion_parameters" : config["cohesion_values"],
                     "alphas" : config["alpha_values"],
-                    "num_voters" : config["total_population"] // districting_config["num_districts"],
-                    "total_seats" : districting_config["num_districts"] * districting_config["num_winners_per_district"], 
+                    "num_voters" : config["total_population"] // districting_config.num_districts,
+                    "total_seats" : districting_config.num_districts * districting_config.num_winners_per_district,
                     "chain_length" : config["chain_length"],
                     # TODO: determine the number of reps (preference profiles to generate per settings file) to be equal across districting configurations, right now its up to the user
                     # "num_reps" : config["chain_length"] if districting_config["num_districts"] == 1 else 1
@@ -46,8 +49,7 @@ def _decode_plan_assignments(filepath)->list:
     return all_plans
 
 def _create_settings_files(config):
-    """
-    Writes a setting file per plan and district with all necessary parameters to generate a preference profile. 
+    """Writes a setting file per plan and district with all necessary parameters to generate a preference profile. 
         
     Args:
         config : json file containing all necessary parameters for generating preference profile
@@ -55,13 +57,20 @@ def _create_settings_files(config):
     """
     run_name = config["run_name"]
     # read the graph and extract demographic data of interest 
-    gdf = gpd.read_file(config["shapefile_path"])
-    demo_df = gdf[[POP_COL, VAP_COL, BVAP_COL]].copy()
+    graph = Graph.from_json(config["graph_path"])
+    node_order = list(graph.nodes)
+    demo_df = pd.DataFrame(
+        {POP_COL: graph.nodes[n][POP_COL],
+         VAP_COL: graph.nodes[n][VAP_COL],
+         BVAP_COL: graph.nodes[n][BVAP_COL]}
+         for n in node_order
+    )
 
     for dc_idx, dc in enumerate(config["districting_configs"]):
         all_plans = _decode_plan_assignments(config["plan_files"][dc_idx])
-
-        for plan_idx, assignment in tqdm(enumerate(all_plans), total=len(all_plans), desc=f"Creating settings files for each district of {dc['num_districts']}-district plans"):
+        settings_folder = Path(f"outputs/{run_name}/settings/{dc.num_districts}_districts")
+        settings_folder.mkdir(parents=True, exist_ok=True)
+        for plan_idx, assignment in tqdm(enumerate(all_plans), total=len(all_plans), desc=f"Creating settings files for each district of {dc.num_districts}-district plans"):
             # get the VAP population and focus/interest group VAP population for this plan
             demo_df["district"] = assignment 
             district_demos = demo_df.groupby("district")[[POP_COL, VAP_COL, BVAP_COL]].sum()
@@ -70,9 +79,9 @@ def _create_settings_files(config):
             for district_label, row in district_demos.iterrows():
                 black_bloc_symbol = "B"
                 nonblack_bloc_symbol = "NB"
-                bloc_proportions = _calculate_bloc_proportions(row[BVAP_COL], row[POP_COL], black_bloc_symbol, nonblack_bloc_symbol)
-                slate_candidates = _make_slates_per_bloc(dc["num_candidates_per_slate"], black_bloc_symbol, nonblack_bloc_symbol)
+                bloc_proportions = _calculate_bloc_proportions(row[BVAP_COL], row[VAP_COL], black_bloc_symbol, nonblack_bloc_symbol)
+                slate_candidates = _make_slates_per_bloc(dc.num_candidates_per_slate, black_bloc_symbol, nonblack_bloc_symbol)
                 settings = _fill_settings_dict(district_label, plan_idx, dc, config, bloc_proportions, slate_candidates)
-                out_path = config["settings_folder"] / f"{run_name}_{dc['num_districts']}_districts_settings_sample_{plan_idx}_district_{district_label+1}.json"
+                out_path = settings_folder/ f"{run_name}_{dc.num_districts}_districts_settings_sample_{plan_idx}_district_{district_label+1}.json"
                 with open(out_path, "w") as f:
                     json.dump(settings, f, indent=4)
